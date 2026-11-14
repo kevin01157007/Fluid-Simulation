@@ -127,7 +127,13 @@ void Fluid::particleRelaxation()
     // TODO 1A: Assign each particle index to its relaxation cell.
     for (int p = 0; p < num_particles; ++p)
     {
-        // TODO
+        const int col = std::clamp
+        (static_cast<int>(std::floor(particle_pos[p].x() / relaxation_cell_dim)),
+        0, relaxation_cell_cols - 1);
+        const int row = std::clamp
+        (static_cast<int>(std::floor(particle_pos[p].y() / relaxation_cell_dim)),
+        0, relaxation_cell_rows - 1);
+        relaxation_cell_particle_ids[row][col].push_back(p);
     }
 
     for (int iter = 0; iter < iterations; ++iter)
@@ -138,11 +144,63 @@ void Fluid::particleRelaxation()
             {
                 // TODO 1B: Resolve overlapping particle pairs in the 3 x 3
                 // neighborhood around relaxation cell (r, c).
+                const auto& particles_in_cell = relaxation_cell_particle_ids[r][c];
+                for (size_t i = 0; i < particles_in_cell.size(); ++i)
+                {
+                    int p = particles_in_cell[i];
+
+                    // 走訪 3x3 鄰近 cell
+                    for (int dr = -1; dr <= 1; ++dr)
+                    {
+                        for (int dc = -1; dc <= 1; ++dc)
+                        {
+                            int nr = r + dr;
+                            int nc = c + dc;
+
+                            // 檢查鄰近 cell 是否在合法範圍內
+                            if (nr < 0 || nr >= relaxation_cell_rows || nc < 0 || nc >= relaxation_cell_cols)
+                                continue;
+
+                            const auto& neighbor_particles = relaxation_cell_particle_ids[nr][nc];
+                            for (int q : neighbor_particles)
+                            {
+                                // 避免重複計算相同粒子對或自我計算
+                                if (q <= p)
+                                    continue;
+
+                                Eigen::Vector2f d = particle_pos[q] - particle_pos[p];
+                                float dist = d.norm();
+                                float min_distance = 2.0f * particle_radius;
+
+                                if (dist < min_distance)
+                                {
+                                    Eigen::Vector2f correction;
+                                    if (dist < EPS) // 代表距離趨近於零（兩粒子重疊
+                                    {
+                                        // 處理完全重疊的例外情況，避免除以零
+                                        correction = Eigen::Vector2f(0.001f, 0.001f);
+                                    }
+                                    else
+                                    {
+                                        correction = 0.5f * (min_distance - dist) * (d / dist);
+                                    }
+
+                                    particle_pos[p] -= correction;
+                                    particle_pos[q] += correction;
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
         // TODO 1C: Re-resolve particle/terrain collision after the positional
         // relaxation step.
+        for (int p = 0; p < num_particles; ++p)
+        {
+            resolveParticleTerrainCollision(particle_pos[p], particle_vel[p]);
+        }
     }
 }
 
