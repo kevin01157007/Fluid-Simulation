@@ -127,12 +127,8 @@ void Fluid::particleRelaxation()
     // TODO 1A: Assign each particle index to its relaxation cell.
     for (int p = 0; p < num_particles; ++p)
     {
-        const int col = std::clamp
-        (static_cast<int>(std::floor(particle_pos[p].x() / relaxation_cell_dim)),
-        0, relaxation_cell_cols - 1);
-        const int row = std::clamp
-        (static_cast<int>(std::floor(particle_pos[p].y() / relaxation_cell_dim)),
-        0, relaxation_cell_rows - 1);
+        const int col = std::clamp(static_cast<int>(std::floor(particle_pos[p].x() / relaxation_cell_dim)),0, relaxation_cell_cols - 1);
+        const int row = std::clamp(static_cast<int>(std::floor(particle_pos[p].y() / relaxation_cell_dim)),0, relaxation_cell_rows - 1);
         relaxation_cell_particle_ids[row][col].push_back(p);
     }
 
@@ -455,16 +451,112 @@ void Fluid::transferVelocities(bool to_cell)
             Eigen::Vector2f pos = particle_pos[p];
             float l = cell_dim;
 
+            // 1. 根據分量套用不同的交錯網格偏移量 (Staggered Grid Offset)
+            // component == 0 -> Vx 偏移 (0.0, 0.5)
+            // component == 1 -> Vy 偏移 (0.5, 0.0)
+            float fx = pos.x();
+            float fy = pos.y();
+
+            if (component == 0) {
+                fy -= 0.5f * l;
+            } else {
+                fx -= 0.5f * l;
+            }
+            // 2. 計算左下角基準點的網格索引 (Base Cell Coordinate)
+            int base_col = static_cast<int>(std::floor(fx / l));
+            int base_row = static_cast<int>(std::floor(fy / l));
+
+            // 3. 設定四個周遭樣本點的索引（對應講義：左下、右下、右上、左上）
+            sample_row[0] = base_row;     sample_col[0] = base_col;     // w1: 下左
+            sample_row[1] = base_row;     sample_col[1] = base_col + 1; // w2: 下右
+            sample_row[2] = base_row + 1; sample_col[2] = base_col + 1; // w3: 上右
+            sample_row[3] = base_row + 1; sample_col[3] = base_col;     // w4: 上左
+
+            // 4. 計算雙線性插值權重 (Bilinear Weights)
+            float x_node = base_col * l;
+            float y_node = base_row * l;
+            if (component == 0) y_node += 0.5f * l;
+            else x_node += 0.5f * l;
+
+            float dx = pos.x() - x_node;
+            float dy = pos.y() - y_node;
+
+            float tx = clampf(dx / l, 0.0f, 1.0f);
+            float ty = clampf(dy / l, 0.0f, 1.0f);
+
+            weight[0] = (1.0f - tx) * (1.0f - ty); // w1
+            weight[1] = tx * (1.0f - ty);          // w2
+            weight[2] = tx * ty;                   // w3
+            weight[3] = (1.0f - tx) * ty;          // w4
 
             if (to_cell)
             {
                 // TODO 2D: Accumulate particle velocity and interpolation
                 // weights into the four MAC-grid samples.
+                for (int k = 0; k < 4; ++k)
+                {
+                    int r = sample_row[k];
+                    int c = sample_col[k];
+                    if (r >= 0 && r < cell_rows && c >= 0 && c < cell_cols)
+                    {
+                        if (component == 0)
+                        {
+                            cell_velocities[r][c].x() += particle_vel[p].x() * weight[k];
+                            weight_sum[r][c].x() += weight[k];
+                        }
+                        else
+                        {
+                            cell_velocities[r][c].y() += particle_vel[p].y() * weight[k];
+                            weight_sum[r][c].y() += weight[k];
+                        }
+                    }
+                }
             }
             else
             {
                 // TODO 2E: Interpolate only valid MAC-grid samples, compute
                 // PIC and FLIP velocities, then blend them using flip_ratio.
+                float pic_val = 0.0f;
+                float flip_diff = 0.0f;
+                float total_weight = 0.0f;
+                
+                // 取得粒子原本的速度分量
+                float old_vel = (component == 0) ? particle_vel[p].x() : particle_vel[p].y();
+
+                for (int k = 0; k < 4; ++k)
+                {
+                    int r = sample_row[k];
+                    int c = sample_col[k];
+                    if (r >= 0 && r < cell_rows && c >= 0 && c < cell_cols)
+                    {
+                        // 檢查該 MAC 邊界是否有效（必須鄰近 FLUID）
+                        if (isFaceVelocityValid(r, c, component))
+                        {
+                            float v_curr = (component == 0) ? cell_velocities[r][c].x() : cell_velocities[r][c].y();
+                            float v_prev = (component == 0) ? prev_cell_velocities[r][c].x() : prev_cell_velocities[r][c].y();
+
+                            pic_val += weight[k] * v_curr;
+                            flip_diff += weight[k] * (v_curr - v_prev);
+                            total_weight += weight[k];
+                        }
+                    }
+                }
+
+                // 若有效權重大於零，則進行正規化並計算 PIC/FLIP
+                if (total_weight > EPS)
+                {
+                    pic_val /= total_weight;
+                    flip_diff /= total_weight;
+                    
+                    float flip_val = old_vel + flip_diff;
+                    // 依據 flip_ratio 進行混合
+                    float blended_vel = (1.0f - flip_ratio) * pic_val + flip_ratio * flip_val;
+
+                    if (component == 0)
+                        particle_vel[p].x() = blended_vel;
+                    else
+                        particle_vel[p].y() = blended_vel;
+                }
             }
         }
     }
@@ -472,9 +564,35 @@ void Fluid::transferVelocities(bool to_cell)
     if (to_cell)
     {
         // TODO 2F: Normalize cell velocities by weight_sum.
+        for (int r = 0; r < cell_rows; ++r)
+        {
+            for (int c = 0; c < cell_cols; ++c)
+            {
+                // 對 x 分量進行加權平均正規化
+                if (weight_sum[r][c].x() > EPS)
+                {
+                    cell_velocities[r][c].x() /= weight_sum[r][c].x();
+                }
+                else
+                {
+                    cell_velocities[r][c].x() = 0.0f;
+                }
+
+                // 對 y 分量進行加權平均正規化
+                if (weight_sum[r][c].y() > EPS)
+                {
+                    cell_velocities[r][c].y() /= weight_sum[r][c].y();
+                }
+                else
+                {
+                    cell_velocities[r][c].y() = 0.0f;
+                }
+            }
+        }
 
         // TODO 2G: Save the normalized pre-projection grid velocity into
         // prev_cell_velocities for the later FLIP update.
+        prev_cell_velocities = cell_velocities;
     }
 }
 
