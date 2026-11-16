@@ -263,9 +263,32 @@ bool Fluid::isFaceVelocityValid(int row, int col, int component) const
     */
 
     // TODO(student): Implement the MAC-face validity test described above.
-    (void)row;
-    (void)col;
-    (void)component;
+    if (component == 0) // 代表水平方向的速度
+    {
+        // Vx(row, col) 位於 (row, col - 1) 與 (row, col) 之間
+        if (row < 0 || row >= cell_rows || col < 0 || col > cell_cols) //這個位置超出範圍了，它是無效的速度樣本，請在插值時直接忽略它。
+            return false;
+
+        bool has_fluid = false;
+        if (col - 1 >= 0 && cell_types[row][col - 1] == CellType::FLUID)
+            has_fluid = true;
+        if (col < cell_cols && cell_types[row][col] == CellType::FLUID)
+            has_fluid = true;
+        return has_fluid;
+    }
+    else if (component == 1) //代表垂直方向的速度
+    {
+        // Vy(row, col) 位於 (row - 1, col) 與 (row, col) 之間
+        if (row < 0 || row > cell_rows || col < 0 || col >= cell_cols)
+            return false;
+
+        bool has_fluid = false;
+        if (row - 1 >= 0 && cell_types[row - 1][col] == CellType::FLUID)
+            has_fluid = true;
+        if (row < cell_rows && cell_types[row][col] == CellType::FLUID)
+            has_fluid = true;
+        return has_fluid;
+    }
     return false;
 }
 
@@ -395,6 +418,13 @@ void Fluid::transferVelocities(bool to_cell)
         applyTerrainTypes();
 
         // TODO 2B: Reset all MAC-grid velocity samples to zero.
+        for (int r = 0; r < cell_rows; ++r)
+        {
+            for (int c = 0; c < cell_cols; ++c)
+            {
+                cell_velocities[r][c].setZero();
+            }
+        }
     }
 
     for (int component = 0; component < 2; ++component)
@@ -418,6 +448,13 @@ void Fluid::transferVelocities(bool to_cell)
               int sample_col[4];
               float weight[4];
             */
+            int sample_row[4];
+            int sample_col[4];
+            float weight[4];
+
+            Eigen::Vector2f pos = particle_pos[p];
+            float l = cell_dim;
+
 
             if (to_cell)
             {
