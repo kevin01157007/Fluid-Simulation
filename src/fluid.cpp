@@ -660,12 +660,85 @@ void Fluid::updateDensity()
     {
         // TODO 3A: Compute cell-center bilinear weights and accumulate this
         // particle's contribution into the four surrounding density samples.
+        Eigen::Vector2f pos = particle_pos[p];
+        float l = cell_dim;
+
+        // 1. 網格中心採樣偏移量 (0.5, 0.5)
+        float fx = pos.x() - 0.5f * l;
+        float fy = pos.y() - 0.5f * l;
+
+        // 2. 計算左下角基準網格索引
+        int base_col = static_cast<int>(std::floor(fx / l));
+        int base_row = static_cast<int>(std::floor(fy / l));
+
+        int sample_row[4];
+        int sample_col[4];
+        float weight[4];
+
+        sample_row[0] = base_row;     sample_col[0] = base_col;     // w1: 下左
+        sample_row[1] = base_row;     sample_col[1] = base_col + 1; // w2: 下右
+        sample_row[2] = base_row + 1; sample_col[2] = base_col + 1; // w3: 上右
+        sample_row[3] = base_row + 1; sample_col[3] = base_col;     // w4: 上左
+
+        // 3. 計算雙線性插值權重
+        float x_node = (base_col + 0.5f) * l;
+        float y_node = (base_row + 0.5f) * l;
+
+        float dx = pos.x() - x_node;
+        float dy = pos.y() - y_node;
+
+        float tx = clampf(dx / l, 0.0f, 1.0f);
+        float ty = clampf(dy / l, 0.0f, 1.0f);
+
+        weight[0] = (1.0f - tx) * (1.0f - ty); // w1
+        weight[1] = tx * (1.0f - ty);          // w2
+        weight[2] = tx * ty;                   // w3
+        weight[3] = (1.0f - tx) * ty;          // w4
+
+        // 4. 累積權重到四周的網格中心（避開 SOLID 網格）
+        for (int k = 0; k < 4; ++k)
+        {
+            int r = sample_row[k];
+            int c = sample_col[k];
+            if (r >= 0 && r < cell_rows && c >= 0 && c < cell_cols)
+            {
+                // 不要將密度寫入 SOLID 網格
+                if (cell_types[r][c] != CellType::SOLID)
+                {
+                    cell_densities[r][c] += 1.0f * weight[k];
+                }
+            }
+        }
     }
 
     if (particle_rest_density <= 0.0f)
     {
         // TODO 3B: Compute the average density of FLUID cells and store it in
         // particle_rest_density. This should only be initialized once.
+        float total_density = 0.0f;
+        int fluid_cell_count = 0;
+
+        for (int r = 0; r < cell_rows; ++r)
+        {
+            for (int c = 0; c < cell_cols; ++c)
+            {
+                if (cell_types[r][c] == CellType::FLUID)
+                {
+                    total_density += cell_densities[r][c];
+                    fluid_cell_count++;
+                }
+            }
+        }
+
+        // 避免除以零的防呆機制
+        if (fluid_cell_count > 0)
+        {
+            particle_rest_density = total_density / static_cast<float>(fluid_cell_count);
+        }
+        else
+        {
+            particle_rest_density = 1.0f; // 預設防呆值
+        }
     }
 }
 
