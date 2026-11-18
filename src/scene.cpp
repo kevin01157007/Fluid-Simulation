@@ -19,6 +19,28 @@ void Fluid::drawScene(int render_option) const
     auto text = [&](float x, float y, float size, ImU32 color, const char* value) {
         d->AddText(ImGui::GetFont(), size, p(x, y), color, value);
     };
+    auto heatColor = [](float t) {
+        t = std::clamp(t, 0.0f, 1.0f);
+        float red, green, blue;
+        if (t < 1.0f / 3.0f) {
+            float blend = t * 3.0f;
+            red = 25.0f + 5.0f * blend;
+            green = 40.0f + 150.0f * blend;
+            blue = 120.0f + 100.0f * blend;
+        } else if (t < 2.0f / 3.0f) {
+            float blend = (t - 1.0f / 3.0f) * 3.0f;
+            red = 30.0f + 220.0f * blend;
+            green = 190.0f + 30.0f * blend;
+            blue = 220.0f - 150.0f * blend;
+        } else {
+            float blend = (t - 2.0f / 3.0f) * 3.0f;
+            red = 250.0f - 30.0f * blend;
+            green = 220.0f - 170.0f * blend;
+            blue = 70.0f - 25.0f * blend;
+        }
+        return IM_COL32(static_cast<int>(red), static_cast<int>(green),
+                        static_cast<int>(blue), 255);
+    };
     const ImU32 ink = IM_COL32(26, 39, 43, 255);
     rect(67, 27, 1034, 833, IM_COL32(12, 21, 29, 255), 22);
     rect(70, 35, 1030, 830, IM_COL32(102, 76, 112, 255), 20);
@@ -55,8 +77,21 @@ void Fluid::drawScene(int render_option) const
                 if (!isTerrainSolid(r, c - 1)) line(x + 1, y, x + 1, y + cell_dim, edge, 3);
                 if (!isTerrainSolid(r, c + 1)) line(x + cell_dim - 1, y, x + cell_dim - 1, y + cell_dim, edge, 3);
             }
-            else if (render_option != 2 && cell_types[r][c] == FLUID)
-                rect(x, y, x + cell_dim, y + cell_dim, IM_COL32(40, 146, 196, 210));
+            else if (cell_types[r][c] == FLUID)
+            {
+                if (render_option == 3) {
+                    float rest_density = std::max(particle_rest_density, 1e-6f);
+                    rect(x, y, x + cell_dim, y + cell_dim,
+                         heatColor(cell_densities[r][c] / (2.0f * rest_density)));
+                } else if (render_option == 4 && r + 1 < cell_rows && c + 1 < cell_cols) {
+                    float vx = 0.5f * (cell_velocities[r][c].x() + cell_velocities[r][c + 1].x());
+                    float vy = 0.5f * (cell_velocities[r][c].y() + cell_velocities[r + 1][c].y());
+                    float speed = std::sqrt(vx * vx + vy * vy);
+                    rect(x, y, x + cell_dim, y + cell_dim, heatColor(speed / 50.0f));
+                } else if (render_option != 2) {
+                    rect(x, y, x + cell_dim, y + cell_dim, IM_COL32(40, 146, 196, 210));
+                }
+            }
         }
 
     // Brick-lined bathroom, kept clear by a protected-air mask.
@@ -144,7 +179,7 @@ void Fluid::drawScene(int render_option) const
     text(390, 278, 16, IM_COL32(236, 215, 187, 255), isLevelCleared() ? "THAT'S THE SPOT!" : "A LITTLE WATER, PLEASE...");
 
     // Particle water is drawn after the character and before the tub's front lip.
-    if (render_option != 0)
+    if (render_option == 1 || render_option == 2)
         for (int i = 0; i < num_particles; ++i)
         {
             const auto& q = particle_pos[i];

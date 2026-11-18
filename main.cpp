@@ -34,6 +34,8 @@ void key(GLFWwindow* w, int k, int, int action, int) {
     if (k == GLFW_KEY_1) render_mode = 2;
     if (k == GLFW_KEY_2) render_mode = 0;
     if (k == GLFW_KEY_3) render_mode = 1;
+    if (k == GLFW_KEY_4) render_mode = 3;
+    if (k == GLFW_KEY_5) render_mode = 4;
 }
 void scroll(GLFWwindow*, double, double amount) {
     if (!ImGui::GetIO().WantCaptureMouse) brush = std::clamp(brush + float(amount) * 3, 10.0f, 65.0f);
@@ -112,6 +114,11 @@ void panel() {
         ImGui::RadioButton("Water", &render_mode, 2); ImGui::SameLine();
         ImGui::RadioButton("Cells", &render_mode, 0); ImGui::SameLine();
         ImGui::RadioButton("Both", &render_mode, 1);
+        ImGui::RadioButton("Density heatmap", &render_mode, 3); ImGui::SameLine();
+        ImGui::RadioButton("Speed heatmap", &render_mode, 4);
+        if (render_mode == 3) ImGui::TextDisabled("Scale: 0 - 2x rest density");
+        if (render_mode == 4) ImGui::TextDisabled("Scale: 0 - 50 velocity units");
+        ImGui::TextDisabled("View shortcuts: 1-5");
         ImGui::TextDisabled("%.0f FPS", ImGui::GetIO().Framerate);
     }
     ImGui::End();

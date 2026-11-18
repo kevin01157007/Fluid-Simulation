@@ -313,7 +313,11 @@ src/fluid.cpp     # required implementation TODOs
 ```
 
 Do not modify rendering, scene geometry, pipe / shower logic, scoring, or other
-game logic unless explicitly allowed as an optional extension.
+game logic unless explicitly allowed as an optional extension. Optional
+visualization modes are available as a bonus; press `1`-`5` to switch views:
+water, cells, both, density heatmap, and speed heatmap. The heatmaps color FLUID
+cells from low (blue) to high (red); density is scaled to twice rest density
+and speed to 50 velocity units.
 
 ## 9. Report
 
