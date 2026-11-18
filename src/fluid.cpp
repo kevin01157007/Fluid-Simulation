@@ -834,16 +834,47 @@ void Fluid::solveIncompressibility()
         {
             for (int c = 1; c < cell_cols - 1; ++c)
             {
-                // TODO 4A: Skip non-FLUID cells and count non-SOLID neighbor
-                // directions.
+                // TODO 4A: Skip non-FLUID cells and count non-SOLID neighbor directions.
+                if (cell_types[r][c] != CellType::FLUID)
+                    continue;
+                int available_direction_count = 0;
 
+                // 檢查四周鄰居是否為非 SOLID（可用方向）
+                bool left_avail   = (cell_types[r][c - 1] != CellType::SOLID);
+                bool right_avail  = (cell_types[r][c + 1] != CellType::SOLID);
+                bool bottom_avail = (cell_types[r - 1][c] != CellType::SOLID);
+                bool top_avail    = (cell_types[r + 1][c] != CellType::SOLID);
+
+                if (left_avail)   available_direction_count++;
+                if (right_avail)  available_direction_count++;
+                if (bottom_avail) available_direction_count++;
+                if (top_avail)    available_direction_count++;
+
+                // 若沒有任何可用方向，則跳過該網格避免除以零
+                if (available_direction_count == 0)
+                    continue;
                 // TODO 4B: Compute MAC-grid divergence.
+                float left   = cell_velocities[r][c].x();
+                float right  = cell_velocities[r][c + 1].x();
+                float bottom = cell_velocities[r][c].y();
+                float top    = cell_velocities[r + 1][c].y();
 
+                float divergence = top + right - left - bottom;
                 // TODO 4C: Apply density correction when enabled.
-
+                if (density_correction) {
+                    float compression = cell_densities[r][c] - particle_rest_density;
+                    if (compression > 0.0f) {
+                        divergence -= stiffness_coefficient * compression;
+                    }
+                }
                 // TODO 4D: Compute the over-relaxed correction magnitude.
+                float correction = over_relaxation * divergence / available_direction_count;
 
                 // TODO 4E: Apply the correction to available MAC faces.
+                if (left_avail)   cell_velocities[r][c].x() += correction;
+                if (right_avail)  cell_velocities[r][c + 1].x() -= correction;
+                if (bottom_avail) cell_velocities[r][c].y() += correction;
+                if (top_avail)    cell_velocities[r + 1][c].y() -= correction;
             }
         }
     }
