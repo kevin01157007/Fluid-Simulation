@@ -26,7 +26,7 @@ Please discuss:
 - how terrain collision is handled after relaxation.
 
 **Implementation summary:**
-透過 Spatial Hashing 概念，將每個粒子の二維坐標除以儲存格尺寸 `relaxation_cell_dim`，再利用 `std::floor` 向下取整數得到對應的 col 與 row。透過 `std::clamp` 限制在合法邊界內後，將粒子索引 p 推入對應的 `relaxation_cell_particle_ids` 陣列中。
+透過 Spatial Hashing 概念，將每個粒子的二維坐標除以儲存格尺寸 `relaxation_cell_dim`，再利用 `std::floor` 向下取整數得到對應的 col 與 row。透過 `std::clamp` 限制在合法邊界內後，將粒子索引 p push 進對應的 `relaxation_cell_particle_ids` 陣列中。
 
 ```cpp
 for (int p = 0; p < num_particles; ++p)
@@ -41,7 +41,7 @@ for (int p = 0; p < num_particles; ++p)
     relaxation_cell_particle_ids[row][col].push_back(p);
 }
 ```
-接著，為避免不必要的 $N^2$ 全局比對，演算法僅需針對當前儲存格及其周圍的 $3 \times 3$ neighborhood 進行檢索。在檢索過程中，透過條件 `if (q <= p) continue;` 略過自我與重複組合以避免重複處理相同粒子對。透過計算兩粒子間的距離，若小於兩倍半徑 (`min_distance = 2 * particle_radius`) 則判定為重疊；若距離趨近於零 (`dist < EPS`) 則給予微小位移以防止除以零的錯誤。當檢測到重疊時，會計算出大小相等、方向相反的 symmetric position correction 向量，分別從兩粒子的位置扣除與疊加。
+接著，為避免不必要的 $N^2$ 全局比對，演算法僅需針對當前儲存格及其周圍的 $3 \times 3$ neighborhood 進行檢索。在檢索過程中，透過條件 `if (q <= p) continue;` 略過重複的組合以避免重複處理相同粒子對。透過計算兩粒子間的距離，若小於兩倍半徑 (`min_distance = 2 * particle_radius`) 則判定為重疊；若距離趨近於零 (`dist < EPS`) 則給予微小位移以防止除以零的錯誤。當檢測到重疊時，會計算出大小相等、方向相反的 symmetric position correction 向量，分別從兩粒子的位置扣除與疊加。
 
 ```cpp
 if (dist < EPS)
@@ -75,7 +75,7 @@ Please discuss:
 - how `flip_ratio` blends PIC and FLIP.
 
 **Implementation summary:**  
-速度轉移分成 Particle → Grid 與 Grid → Particle 兩個方向。網格採用 staggered MAC-grid：`cell_velocities[row][col].x()` 儲存該 cell 左側垂直面上的水平速度 Vx，`.y()` 儲存下側水平面上的垂直速度 Vy。因此 Vx 與 Vy 的取樣位置不同：以 cell 尺寸 `cell_dim` 為尺度 ( 半格的實際距離為 $0.5 \times cell\_dim$ )，Vx 的偏移是 `(0, 0.5)`，Vy 的偏移是 `(0.5, 0)`。這樣可讓速度分量取樣於各自方向的 cell face，而不是都取在 cell center。
+速度轉移分成 Particle → Grid 與 Grid → Particle 兩個方向。網格採用 staggered MAC-grid：`cell_velocities[row][col].x()` 儲存該 cell 左側垂直面上的水平速度 Vx，`.y()` 儲存下側水平面上的垂直速度 Vy。因此 Vx 與 Vy 的取樣位置不同：以 cell 尺寸 `cell_dim` 為尺度 ( 半格的實際距離為 $0.5 \times cell\_dim$ )，Vx 的偏移是 `(0, 0.5)`，Vy 的偏移是 `(0.5, 0)`。這樣可讓速度分量取樣各自方向的 cell face，而不是都取樣在 cell center。
 
 對每個粒子及速度分量，先依該分量的偏移量換算到對應的取樣網格，再用 `floor` 找到左下方的基準樣本 `(base_col, base_row)`。另外三個樣本依序為右下、右上與左上。令粒子相對於基準樣本的局部座標為 `tx = clamp(dx / cell_dim, 0, 1)`、`ty = clamp(dy / cell_dim, 0, 1)`，四個雙線性權重依序為：
 
@@ -116,7 +116,7 @@ weight[3] = (1.0f - tx) * ty;
 
 進行 Particle → Grid 時，先呼叫 `applyTerrainTypes()` 更新 SOLID 與 FLUID 標記，並將網格速度歸零。每個粒子把自己的對應速度分量乘上四個權重，累加至周圍有效範圍內的網格樣本；同時累加各樣本的權重總和。所有粒子處理完後，各有貢獻的樣本以速度加權總和除以權重總和，形成加權平均；沒有貢獻的分量設為零。
 
-正規化後，呼叫 `solveIncompressibility()` 投影之前，將整個速度場複製到 `prev_cell_velocities`。投影會改變目前網格速度，而 FLIP 需要比較投影後與投影前的速度差，因此必須在這個時間點保存原始網格速度。
+正規化後，呼叫 `solveIncompressibility()` 投影之前，將整個速度場複製到 `prev_cell_velocities`。投影會改變目前網格速度，而 FLIP 需要比較投影後與投影前的速度差，因此必須保存原始網格速度。
 
 ```cpp
 if (component == 0)
@@ -196,7 +196,7 @@ Please discuss:
 - why the rest density is computed only once.
 
 **Implementation summary:**  
-每一幀開始時，先將所有 `cell_densities` 歸零，再將粒子密度分配至周圍網格。由於密度代表 cell 內粒子的分布，取樣位置使用 cell center，偏移量為 `(0.5, 0.5)` 個 cell；這與取樣在 cell face 上的 MAC 速度不同。程式從粒子位置的 x、y 座標各減去 $0.5 \times cell\_dim$，換算到 cell-center 樣本網格，並用 `floor` 找到左下方基準樣本。
+每一幀開始時，先將所有 `cell_densities` 歸零，再將粒子密度分配至周圍網格。由於密度代表 cell 內粒子的分布，取樣位置使用 cell center，偏移量為 `(0.5, 0.5)` 個 cell；這與取樣在 cell face 上的 MAC 速度不同。從粒子位置的 x、y 座標各減去 $0.5 \times cell\_dim$，換算到 cell-center 樣本網格，並用 `floor` 找到左下方基準樣本。
 
 接著找出周圍四個 cell-center 樣本，依粒子相對於基準樣本的局部座標 `tx`、`ty` 計算雙線性權重：
 
@@ -217,7 +217,7 @@ weight[2] = tx * ty;
 weight[3] = (1.0f - tx) * ty;
 ```
 
-對每個位於網格範圍內的樣本，若該 cell 不是 `SOLID`，就將粒子的單位貢獻乘上對應權重並累加至 `cell_densities`；因此粒子會將密度平滑分散到周圍 cell，而不只落在單一格中。`SOLID` cell 不接收密度貢獻：
+對每個位於網格範圍內的樣本，若該 cell 不是 `SOLID`，就將粒子的單位貢獻乘上對應權重並累加至 `cell_densities`；因此粒子會將密度平滑分散到周圍 cell，而不只落在單一網格中。`SOLID` cell 不接收密度貢獻：
 
 ```cpp
 if (r >= 0 && r < cell_rows && c >= 0 && c < cell_cols)
@@ -272,7 +272,7 @@ Please discuss:
 - why the solver is repeated for multiple iterations.
 
 **Implementation summary:**  
-不可壓縮性求解器會依設定的 `iterations` 重複掃描網格，逐步修正流體速度，使 `FLUID` cell 的散度趨近於零。每次掃描只處理內部 cell（row、col 從 1 到邊界前一格），以確保讀取相鄰 cell 與 MAC 面速度時索引有效；非 `FLUID` cell 會直接略過。
+Incompressibility Solver 會依設定的 `iterations` 重複掃描網格，逐步修正流體速度，使 `FLUID` cell 的散度趨近於零。每次掃描只處理內部 cell（row、col 從 1 到邊界前一格），以確保讀取相鄰 cell 與 MAC 面速度時索引有效；非 `FLUID` cell 會直接略過。
 
 對每個 `FLUID` cell，先檢查左右上下相鄰 cell 是否不是 `SOLID`，並將可用方向數量加總。與 `SOLID` 相鄰的方向不可流動，因此不納入修正；若四個方向都不可用，就略過該 cell，避免除以零。接著依 MAC-grid 的面速度計算散度：
 
@@ -291,7 +291,7 @@ divergence = top + right - left - bottom
 correction = over_relaxation * divergence / available_direction_count
 ```
 
-最後只更新可用方向的面速度：左、下速度加上修正量，右、上速度扣除修正量，藉此降低散度。重複多次迭代，讓先前更新過的速度在後續掃描中繼續調整，逐步逼近不可壓縮狀態；`over_relaxation` 則用來調整每次修正的幅度、加速收斂。
+最後只更新可用方向的面速度：左、下速度加上修正量，右、上速度扣除修正量，藉此降低散度。重複多次迭代，讓先前更新過的速度在後續掃描中繼續調整，逐步逼近  incompressibility 狀態；`over_relaxation` 則用來調整每次修正的幅度、加速收斂。
 
 ---
 
@@ -319,7 +319,7 @@ Test the following values:
 
 | FLIP Ratio | Observation |
 | --- | --- |
-| 0.0 | 動能消散極快，流體表現出高度黏滯性（類似蜂蜜），缺乏水花與動態細節。 |
+| 0.0 | 動能消散極快，流體表現出高黏滯性，缺乏水花與動態細節。 |
 | 0.5 | 流體兼具穩定性與適度的動態表現，能維持合理的流動感與部分水花。 |
 | 0.95 | 高度保留動能，水流極為活潑且容易產生豐富的水花與波動。 |
 
@@ -348,7 +348,7 @@ Test the following values:
 | Solver Iterations | Observation |
 | --- | --- |
 | 1 | 流體壓縮嚴重，無法有效滿足 Incompressibility，體積無法保持。 |
-| 3 | 體積與不可壓縮性達到可接受的水準。 |
+| 3 | 體積與 Incompressibility 達到可接受的水準。 |
 | 8 | 散度被嚴格壓制，流體表現出極佳的體積保持能力與穩定性 |
 
 **Discussion:**  
@@ -357,7 +357,7 @@ compression, volume preservation, visual stability, and computational cost.
 
 Incompressibility solver 採用迭代 Gauss-Seidel projection 來消除 MAC 網格上的速度散度。
 
-單次迭代（1）不足以使壓力/散度收斂，導致高散度、體積損失，甚至可能錯誤。default（3次迭代）在即時互動性和精確度之間取得了良好的平衡，足以滿足互動遊戲的不可壓縮性條件。
+單次迭代（1）不足以使壓力/散度收斂，導致高散度、體積損失，甚至可能錯誤。default（3次迭代）在即時互動性和精確度之間取得了良好的平衡，足以滿足互動遊戲的 Incompressibility 條件。
 將迭代次數增加到8次可以更嚴格地在整個網格上強制執行無散度條件，從而最大限度地保證體積守恆，但代價是每幀的 CPU 開銷會增加。
 
 
@@ -426,7 +426,7 @@ Examples:
 
 **Screenshot / evidence (if applicable):**  
 ```text
-執行程式後按 4、5 可分別查看密度與速度熱圖；提交報告時可在此附上兩種視圖的截圖。
+執行程式後按 4、5 可分別查看密度與速度熱圖。
 ```
 <figure align="center">
   <img src="assets/densityheatmap.png" alt="替代文字">
